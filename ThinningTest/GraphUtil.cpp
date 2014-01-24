@@ -508,16 +508,31 @@ RoadEdgeDesc GraphUtil::getEdge(RoadGraph& roads, RoadVertexDesc src, RoadVertex
 /**
  * Sort the points of the polyline of the edge in such a way that the first point is the location of the src vertex.
  */
-std::vector<QVector2D> GraphUtil::getOrderedPolyLine(RoadGraph* roads, RoadEdgeDesc e) {
-	std::vector<QVector2D> ret = roads->graph[e]->getPolyLine();
+/*
+std::vector<QVector2D> GraphUtil::getOrderedPolyLine(RoadGraph& roads, RoadEdgeDesc e) {
+	std::vector<QVector2D> ret = roads.graph[e]->getPolyLine();
 
-	RoadVertexDesc src = boost::source(e, roads->graph);
-	RoadVertexDesc tgt = boost::target(e, roads->graph);
-	if ((roads->graph[src]->getPt() - roads->graph[e]->getPolyLine()[0]).lengthSquared() < (roads->graph[tgt]->getPt() - roads->graph[e]->getPolyLine()[0]).lengthSquared()) {
+	RoadVertexDesc src = boost::source(e, roads.graph);
+	RoadVertexDesc tgt = boost::target(e, roads.graph);
+	if ((roads.graph[src]->getPt() - roads.graph[e]->getPolyLine()[0]).lengthSquared() <= (roads.graph[tgt]->getPt() - roads.graph[e]->getPolyLine()[0]).lengthSquared()) {
 		return ret;
 	} else {
 		std::reverse(ret.begin(), ret.end());
 		return ret;
+	}
+}
+*/
+
+/**
+ * Sort the points of the polyline of the edge in such a way that the first point is the location of the src vertex.
+ */
+void GraphUtil::getOrderedPolyLine(RoadGraph& roads, RoadEdgeDesc e, std::vector<QVector2D>& polyline) {
+	polyline = roads.graph[e]->getPolyLine();
+
+	RoadVertexDesc src = boost::source(e, roads.graph);
+	RoadVertexDesc tgt = boost::target(e, roads.graph);
+	if ((roads.graph[src]->getPt() - roads.graph[e]->getPolyLine()[0]).lengthSquared() > (roads.graph[tgt]->getPt() - roads.graph[e]->getPolyLine()[0]).lengthSquared()) {
+		std::reverse(polyline.begin(), polyline.end());
 	}
 }
 
@@ -1985,18 +2000,18 @@ void GraphUtil::simplify2(RoadGraph& roads, float dist_threshold) {
 
 		if (min_group_id >= 0 && min_dist < threshold2) {
 			group_centers[min_group_id] = group_centers[min_group_id] * group_nums[min_group_id] + temp.graph[*vi]->pt;
+			group_nums[min_group_id]++;
+			group_centers[min_group_id] /= group_nums[min_group_id];
 		} else {
 			min_group_id = group_centers.size();
 			group_centers.push_back(temp.graph[*vi]->pt);
+			group_nums.push_back(1);
 		}
-
-		group_nums[min_group_id]++;
-		group_centers[min_group_id] /= group_nums[min_group_id];
-
+		
 		groups[*vi] = min_group_id;
 	}
 
-	// グループの中心に頂点を移動する
+	// エッジを登録する
 	QHash<int, RoadVertexDesc> conv;	// group center ⇒ 実際の頂点desc
 	RoadGraph temp2;
 	for (int i = 0; i < group_centers.size(); i++) {
@@ -2018,11 +2033,15 @@ void GraphUtil::simplify2(RoadGraph& roads, float dist_threshold) {
 		// エッジが点に縮退する場合は、スキップ
 		if (new_src == new_tgt) continue;
 
+		// 既にエッジがあれば、スキップ
+		if (hasEdge(temp2, new_src, new_tgt)) continue;
+
+		// エッジを追加
 		RoadEdgeDesc e = addEdge(temp2, new_src, new_tgt, temp.graph[*ei]);
 		moveEdge(temp2, e, temp2.graph[new_src]->pt, temp2.graph[new_tgt]->pt);
 	}
 
-	// 近くにエッジがあれば、エッジ上に頂点を移動する
+	copyRoads(temp2, roads);
 
 	roads.setModified();
 }
@@ -2066,6 +2085,52 @@ void GraphUtil::normalize(RoadGraph& roads) {
 
 		// Add the last edge
 		addEdge(roads, prev_desc, last_desc, roads.graph[*ei]->type, roads.graph[*ei]->lanes, roads.graph[*ei]->oneWay);
+	}
+}
+
+/**
+ * エッジを指定されたstep_sizeで分割し、それぞれの点を全て頂点として登録する。
+ */
+void GraphUtil::normalize(RoadGraph& roads, float step_size) {
+	RoadGraph temp;
+	copyRoads(roads, temp);
+
+	RoadEdgeIter ei, eend;
+	for (boost::tie(ei, eend) = boost::edges(roads.graph); ei != eend; ++ei) {
+		roads.graph[*ei]->valid = false;
+	}
+	
+	for (boost::tie(ei, eend) = boost::edges(temp.graph); ei != eend; ++ei) {
+		if (!temp.graph[*ei]->valid) continue;
+
+		RoadVertexDesc src = boost::source(*ei, temp.graph);
+		RoadVertexDesc tgt = boost::target(*ei, temp.graph);
+
+		std::vector<QVector2D> line = finerEdge(temp, *ei, step_size);
+
+		RoadVertexDesc prev_desc;
+		RoadVertexDesc last_desc;
+		if ((temp.graph[src]->pt - line[0]).lengthSquared() < (temp.graph[tgt]->pt - line[0]).lengthSquared()) {
+			prev_desc = src;
+			last_desc = tgt;
+		} else {
+			prev_desc = tgt;
+			last_desc = src;
+		}
+
+		for (int i = 1; i < line.size() - 1; i++) {
+			// add all the points along the poly line as vertices
+			RoadVertexDesc new_v_desc = boost::add_vertex(roads.graph);
+			roads.graph[new_v_desc] = RoadVertexPtr(new RoadVertex(line[i]));
+
+			// Add an edge
+			addEdge(roads, prev_desc, new_v_desc, temp.graph[*ei]->type, temp.graph[*ei]->lanes, temp.graph[*ei]->oneWay);
+
+			prev_desc = new_v_desc;
+		}
+
+		// Add the last edge
+		addEdge(roads, prev_desc, last_desc, temp.graph[*ei]->type, temp.graph[*ei]->lanes, temp.graph[*ei]->oneWay);
 	}
 }
 
@@ -3105,8 +3170,10 @@ float GraphUtil::computeSimilarity(RoadGraph* roads1, QMap<RoadVertexDesc, RoadV
 
 			// increase the score according to the difference in the angle of the edges.
 			//float angle_diff = diffAngle(roads1->graph[tgt1]->pt - roads1->graph[src1]->pt, roads2->graph[tgt2]->pt - roads2->graph[src2]->pt);
-			std::vector<QVector2D> polyLine1 = getOrderedPolyLine(roads1, *ei);
-			std::vector<QVector2D> polyLine2 = getOrderedPolyLine(roads2, e2);
+			std::vector<QVector2D> polyLine1;
+			getOrderedPolyLine(*roads1, *ei, polyLine1);
+			std::vector<QVector2D> polyLine2;
+			getOrderedPolyLine(*roads2, e2, polyLine2);
 			float angle_diff1 = diffAngle(polyLine1[1] - polyLine1[0], polyLine2[1] - polyLine2[0]);
 			score += expf(-angle_diff1) * w_angle * 0.5f;
 			float angle_diff2 = diffAngle(polyLine1[polyLine1.size() - 1] - polyLine1[polyLine1.size() - 2], polyLine2[polyLine2.size() - 1] - polyLine2[polyLine2.size() - 2]);
@@ -3149,8 +3216,10 @@ float GraphUtil::computeSimilarity(RoadGraph* roads1, QMap<RoadVertexDesc, RoadV
 
 			// increase the score according to the difference in the angle of the edges.
 			//float angle_diff = diffAngle(roads1->graph[tgt1]->pt - roads1->graph[src1]->pt, roads2->graph[tgt2]->pt - roads2->graph[src2]->pt);
-			std::vector<QVector2D> polyLine1 = getOrderedPolyLine(roads1, e1);
-			std::vector<QVector2D> polyLine2 = getOrderedPolyLine(roads2, *ei);
+			std::vector<QVector2D> polyLine1;
+			getOrderedPolyLine(*roads1, e1, polyLine1);
+			std::vector<QVector2D> polyLine2;
+			getOrderedPolyLine(*roads2, *ei, polyLine2);
 			float angle_diff1 = diffAngle(polyLine1[1] - polyLine1[0], polyLine2[1] - polyLine2[0]);
 			score += expf(-angle_diff1) * w_angle * 0.5f;
 			float angle_diff2 = diffAngle(polyLine1[polyLine1.size() - 1] - polyLine1[polyLine1.size() - 2], polyLine2[polyLine2.size() - 1] - polyLine2[polyLine2.size() - 2]);
@@ -3651,28 +3720,35 @@ bool GraphUtil::nextSequence(std::vector<int>& seq, int N) {
 
 /**
  * Return a histogram of the edge lengths.
+ * 以下の式に基づいて、ビンを決定する。
+ * e * log(L) - 4
+ * 
+ * ただし、Lはエッジ長。
  */
-cv::MatND GraphUtil::computeEdgeLengthHistogram(RoadGraph& roads, int size) {
-	cv::Mat lengthMat(1, getNumEdges(roads), CV_32FC1);
-	
-	// build a matrix that contains the length of each edge
+cv::MatND GraphUtil::computeEdgeLengthHistogram(RoadGraph& roads, bool normalize) {
+	int histSize = 15;
+
+	// initialize the histogram
+	cv::MatND hist = cv::MatND::zeros(1, histSize, CV_32F);
+
+	// check the length of each edge
 	int count = 0;
 	RoadEdgeIter ei, eend;
 	for (boost::tie(ei, eend) = boost::edges(roads.graph); ei != eend; ++ei) {
 		if (!roads.graph[*ei]->valid) continue;
 
-		lengthMat.at<float>(0, count++) = roads.graph[*ei]->getLength();
+		float length = roads.graph[*ei]->getLength();
+		int bin = logf(length) * expf(1) - 4;
+		if (bin < 0) bin = 0;
+		if (bin >= histSize) bin = histSize - 1;
+		hist.at<float>(0, bin)++;
+
+		count++;
 	}
 
-	// create a histogram
-	float range[] = { 0, 500 };
-	const float* ranges = { range };
-	cv::MatND hist;
-	cv::calcHist(&lengthMat, 1, 0, cv::Mat(), hist, 1, &size, &ranges, true, false);
-
 	// normalize the histogram
-	if (count > 0) {
-		hist /= count;
+	if (normalize) {
+		if (count > 0) hist /= count;
 	}
 
 	return hist;
@@ -3684,7 +3760,7 @@ cv::MatND GraphUtil::computeEdgeLengthHistogram(RoadGraph& roads, int size) {
 cv::MatND GraphUtil::computeEdgeCurvatureHistogram(RoadGraph& roads, int size) {
 	cv::Mat curvatureMat = cv::Mat::zeros(1, getNumEdges(roads), CV_32FC1);
 	
-	// build a matrix that contains the curvature of each edge
+	// build a matrix that contains the length of each edge
 	int count = 0;
 	RoadEdgeIter ei, eend;
 	for (boost::tie(ei, eend) = boost::edges(roads.graph); ei != eend; ++ei) {
@@ -3709,9 +3785,7 @@ cv::MatND GraphUtil::computeEdgeCurvatureHistogram(RoadGraph& roads, int size) {
 	cv::calcHist(&curvatureMat, 1, 0, cv::Mat(), hist, 1, &size, &ranges, true, false);
 
 	// normalize the histogram
-	if (count > 0) {
-		hist /= count;
-	}
+	cv::normalize(hist, hist, 0, 1, cv::NORM_MINMAX, -1, cv::Mat());
 
 	return hist;
 }
@@ -3733,6 +3807,71 @@ float GraphUtil::computeAvgEdgeLength(RoadGraph& roads) {
 
 	if (count == 0) return 0;
 	else return length / (float)count;
+}
+
+/**
+ * 道路網から、交差点のアームの方向、長さの２次元ヒストグラムを生成する。
+ */
+void GraphUtil::computeHistogram(RoadGraph& roads, cv::Mat& hist) {
+	// histogram size
+	int histDirSize = 18;
+	int histLengthSize = 15;
+
+	// initialize the histogram
+	hist = cv::Mat::zeros(histDirSize, histLengthSize, CV_32FC1);
+
+	int count = 0;
+	RoadVertexIter vi, vend;
+	for (boost::tie(vi, vend) = boost::vertices(roads.graph); vi != vend; ++vi) {
+		if (!roads.graph[*vi]->valid) continue;
+
+		RoadOutEdgeIter ei, eend;
+		for (boost::tie(ei, eend) = boost::out_edges(*vi, roads.graph); ei != eend; ++ei) {
+			if (!roads.graph[*ei]->valid) continue;
+
+			RoadVertexDesc tgt = boost::target(*ei, roads.graph);
+
+			// get the direction
+			std::vector<QVector2D> polyline;
+			getOrderedPolyLine(roads, *ei, polyline);
+			QVector2D baseDir = polyline[1] - polyline[0];
+			float theta = atan2f(baseDir.y(), baseDir.x());
+			if (theta < 0) theta += M_PI * 2;
+			int binDir = theta * (float)histDirSize / M_PI / 2.0f;
+			if (binDir >= histDirSize) binDir = histDirSize - 1;
+
+			// get the length
+			float length = roads.graph[*ei]->getLength();
+			int binLength = logf(length) * expf(1) - 4;
+			if (binLength < 0) binLength = 0;
+			if (binLength >= histLengthSize) binLength = histLengthSize - 1;
+
+			// get the curvature
+			/*
+			float totalT = 0.0f;
+			float totalS = 0.0f;
+			baseDir.normalize();
+			int numSegments = 0;
+			for (int i = 2; i < polyline.size(); i++) {
+				QVector2D dir = roads.graph[*ei]->polyLine[i] - roads.graph[*ei]->polyLine[i - 1];
+				float s = dir.length();
+				dir.normalize();
+
+				totalT += (dir - baseDir).length();
+				totalS += s;
+			}
+			float curvature = 0.0f;
+			if (totalT > 0) {
+				curvature = totalS / totalT;
+			}
+			int binCurvature = logf(curvature + 0.00001f) + 5;
+			if (binCurvature < 0) binCurvature = 0;
+			if (binCurvature >= histCurvatureSize) binCurvature = histCurvatureSize - 1;
+			*/
+
+			hist.at<float>(binDir, binLength)++;
+		}
+	}
 }
 
 /**
@@ -4311,12 +4450,14 @@ void GraphUtil::printStatistics(RoadGraph* roads) {
 /**
  * 道路網をcv::Mat行列に置き換える
  */
-void GraphUtil::convertToMat(RoadGraph& roads, cv::Mat_<uchar>& mat, const cv::Size& size, bool flip) {
+void GraphUtil::convertToMat(RoadGraph& roads, cv::Mat_<uchar>& mat, const cv::Size& size, int width, bool flip) {
 	mat = cv::Mat_<uchar>(size, 0);
 
 	RoadEdgeIter ei, eend;
 	for (boost::tie(ei, eend) = boost::edges(roads.graph); ei != eend; ++ei) {
-		drawRoadSegmentOnMat(roads, *ei, mat);
+		if (!roads.graph[*ei]->valid) continue;
+
+		drawRoadSegmentOnMat(roads, *ei, mat, width);
 	}
 
 	// 上下を反転

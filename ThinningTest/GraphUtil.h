@@ -60,7 +60,8 @@ public:
 	static RoadEdgeDesc addEdge(RoadGraph& roads, RoadVertexDesc src, RoadVertexDesc tgt, RoadEdgePtr ref_edge);
 	static bool hasEdge(RoadGraph& roads, RoadVertexDesc desc1, RoadVertexDesc desc2, bool onlyValidEdge = true);
 	static RoadEdgeDesc getEdge(RoadGraph& roads, RoadVertexDesc src, RoadVertexDesc tgt, bool onlyValidEdge = true);
-	static std::vector<QVector2D> getOrderedPolyLine(RoadGraph* roads, RoadEdgeDesc e);
+	//static std::vector<QVector2D> getOrderedPolyLine(RoadGraph& roads, RoadEdgeDesc e);
+	static void getOrderedPolyLine(RoadGraph& roads, RoadEdgeDesc e, std::vector<QVector2D>& polyline);
 	static void orderPolyLine(RoadGraph& roads, RoadEdgeDesc e, RoadVertexDesc src);
 	static void moveEdge(RoadGraph& roads, RoadEdgeDesc e, QVector2D& src_pos, QVector2D& tgt_pos);
 	static bool removeDeadEnd(RoadGraph& roads);
@@ -108,6 +109,7 @@ public:
 	static void simplify(RoadGraph& roads, float dist_threshold);
 	static void simplify2(RoadGraph& srcRoad, float dist_threshold);
 	static void normalize(RoadGraph& roads);
+	static void normalize(RoadGraph& roads, float step_size);
 	static void singlify(RoadGraph& roads);
 	static void planarify(RoadGraph& roads);
 	static bool planarifyOne(RoadGraph& roads);
@@ -149,9 +151,10 @@ public:
 	static bool nextSequence(std::vector<int>& seq, int N);
 
 	// Statistics
-	static cv::MatND computeEdgeLengthHistogram(RoadGraph& roads, int size);
+	static cv::MatND computeEdgeLengthHistogram(RoadGraph& roads, bool normalize = true);
 	static cv::MatND computeEdgeCurvatureHistogram(RoadGraph& roads, int size);
 	static float computeAvgEdgeLength(RoadGraph& roads);
+	static void computeHistogram(RoadGraph& roads, cv::Mat& hist);
 
 	static QList<EdgePair> getClosestEdgePairs(RoadGraph* roads1, RoadGraph* roads2, int num);
 
@@ -171,7 +174,7 @@ public:
 	static void printStatistics(RoadGraph* roads);
 
 	// OpenCV
-	static void convertToMat(RoadGraph& roads, cv::Mat_<uchar>& mat, const cv::Size& size, bool flip = true);
+	static void convertToMat(RoadGraph& roads, cv::Mat_<uchar>& mat, const cv::Size& size, int width = 3, bool flip = true);
 	static void drawRoadSegmentOnMat(RoadGraph& roads, RoadEdgeDesc e, cv::Mat& mat, int width = 3, int brightness = 255);
 };
 
