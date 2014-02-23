@@ -10,7 +10,7 @@
 
 #include <opencv/cv.h>
 #include <opencv/highgui.h>
-#include "RoadGraph.h"
+#include <road/RoadGraph.h>
 
 class ThinningUtil {
 protected:

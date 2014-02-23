@@ -10,7 +10,7 @@
 #include <iostream>
 #include <opencv/cv.h>
 #include <opencv/highgui.h>
-#include "GraphUtil.h"
+#include <road/GraphUtil.h>
 #include "ThinningUtil.h"
 
 int main(int argc, char *argv[]) {

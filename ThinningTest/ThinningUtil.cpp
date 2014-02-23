@@ -1,5 +1,5 @@
-﻿#include "ThinningUtil.h"
-#include "GraphUtil.h"
+﻿#include <road/GraphUtil.h>
+#include "ThinningUtil.h"
 
 /**
  * Perform one thinning iteration.
